@@ -1,0 +1,5 @@
+.vscode/
+.idea/
+build/
+*.mp4
+ydwd.py
