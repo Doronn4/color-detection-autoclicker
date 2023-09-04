@@ -15,7 +15,7 @@ BLUE = (219, 90, 74)
 
 # Circle settings
 CIRCLE_RADIUS = 30
-CIRCLE_SPEED = 2  # Adjust the speed as needed
+CIRCLE_SPEED = 4  # Adjust the speed as needed
 
 # Function to generate random position for the circle
 def random_position():

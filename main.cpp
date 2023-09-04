@@ -1,53 +1,61 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
-#include <Windows.h>
 #include <thread>
 #include <chrono>
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/extensions/XTest.h>
 
 #define DEBUG false
 #define LIMIT_FPS false
 
-class ScreenshotTaker
-{
+class ScreenshotTaker {
 public:
-    ScreenshotTaker(HWND targetWindow, int captureWidth, int captureHeight, int startX, int startY)
-        : hdc(GetDC(targetWindow)),
-          hbitmap(CreateCompatibleBitmap(hdc, captureWidth, captureHeight)),
-          memdc(CreateCompatibleDC(hdc)),
-          oldbmp(SelectObject(memdc, hbitmap)),
-          mat(captureHeight, captureWidth, CV_8UC4),
-          bi{sizeof(bi), captureWidth, -captureHeight, 1, 32, BI_RGB},
+    ScreenshotTaker(Window targetWindow, int captureWidth, int captureHeight, int startX, int startY, Display *targetDisplay)
+        : display(targetDisplay),
+          target(targetWindow),
+          captureWidth(captureWidth),
+          captureHeight(captureHeight),
           startX(startX),
-          startY(startY),
-          target(targetWindow)
-    {
+          startY(startY) {
+
+        rootWindow = DefaultRootWindow(display);
+
+        // Create an XImage to store the captured data
+        image = XGetImage(display, rootWindow, startX, startY, captureWidth, captureHeight, AllPlanes, ZPixmap);
+
+        // Initialize an OpenCV Mat with the same dimensions
+        mat = cv::Mat(captureHeight, captureWidth, CV_8UC4, image->data);
     }
 
-    ~ScreenshotTaker()
-    {
-        SelectObject(memdc, oldbmp);
-        DeleteDC(memdc);
-        DeleteObject(hbitmap);
-        ReleaseDC(target, hdc);
+    ~ScreenshotTaker() {
+        if (image) {
+            XDestroyImage(image);
+        }
+
+        if (display) {
+            XCloseDisplay(display);
+        }
     }
 
-    cv::Mat takeScreenshotPart()
-    {
-        BitBlt(memdc, 0, 0, bi.biWidth, -bi.biHeight, hdc, startX, startY, SRCCOPY);
-        GetDIBits(hdc, hbitmap, 0, -bi.biHeight, mat.data, (BITMAPINFO *)&bi, DIB_RGB_COLORS);
+    cv::Mat takeScreenshotPart() {
+        // Capture the screen region into the XImage
+        XGetSubImage(display, rootWindow, startX, startY, captureWidth, captureHeight, AllPlanes, ZPixmap, image, 0, 0);
+
+        // Return the captured data as an OpenCV Mat
         return mat;
     }
 
 private:
-    HDC hdc;
-    HBITMAP hbitmap;
-    HDC memdc;
-    HGDIOBJ oldbmp;
-    cv::Mat mat;
-    BITMAPINFOHEADER bi;
+    Display *display;
+    Window target;
+    Window rootWindow;
+    int captureWidth;
+    int captureHeight;
     int startX;
     int startY;
-    HWND target;
+    XImage *image;
+    cv::Mat mat;
 };
 
 const cv::Scalar yellowLow = cv::Scalar(18, 100, 235);
@@ -59,7 +67,7 @@ const cv::Scalar treasureHigh = cv::Scalar(179, 25, 255);
 const cv::Scalar badLow = cv::Scalar(4, 170, 228);
 const cv::Scalar badHigh = cv::Scalar(8, 180, 240);
 
-const LPCSTR WINDOW_NAME = "Moving Circles"; //"BlueStacks App Player";
+const char *WINDOW_NAME = "Moving Circles"; //"BlueStacks App Player";
 const int THREADS_NUM = 12;
 const int leftGap = 0; // 320;
 const int topGap = 0;  // 115; // 143;
@@ -71,22 +79,84 @@ const int TARGET_FPS = 120;
 const double MIN_RECT_AREA = 30 * 30;
 
 const std::chrono::milliseconds FRAME_DURATION(1000 / TARGET_FPS);
-const long DX_C = 65535 / GetSystemMetrics(SM_CXSCREEN);
-const long DY_C = 65535 / GetSystemMetrics(SM_CYSCREEN);
 struct ClickedRect
 {
     cv::Point center;
     std::chrono::time_point<std::chrono::high_resolution_clock> clickedTime;
 };
+
+struct POINT
+{
+    int x;
+    int y;
+};
+
 POINT zeroWindow = {0, 0};
+
 std::mutex coutMutex;
 
-void ClickMouse(int x, int y, INPUT &input)
-{
-    input.mi.dx = (x + zeroWindow.x) * DX_C;
-    input.mi.dy = (y + zeroWindow.y) * DY_C;
+Display* display;
 
-    SendInput(1, &input, sizeof(INPUT));
+Window getWindowByName(const char* windowName) {
+    if (!display) {
+        // Handle error: Unable to open X display
+        return 0;
+    }
+
+    Window rootWindow = DefaultRootWindow(display);
+
+    Window targetWindow = 0;
+    Window parent, *children;
+    unsigned int nChildren;
+
+    XQueryTree(display, rootWindow, &rootWindow, &parent, &children, &nChildren);
+
+    for (unsigned int i = 0; i < nChildren; ++i) {
+        XTextProperty windowNameProperty;
+        if (XGetWMName(display, children[i], &windowNameProperty) != 0) {
+            char** list;
+            int count;
+            if (XmbTextPropertyToTextList(display, &windowNameProperty, &list, &count) == Success) {
+                for (int j = 0; j < count; ++j) {
+                    if (std::strcmp(windowName, list[j]) == 0) {
+                        targetWindow = children[i];
+                        break;
+                    }
+                }
+                XFreeStringList(list);
+            }
+        }
+    }
+
+    XFree(children);
+    XCloseDisplay(display);
+
+    return targetWindow;
+}
+
+void clientToScreen(Window window, POINT& clientPoint) {
+    Window rootWindow;
+    int rootX, rootY;
+    unsigned int mask;
+    if (XQueryPointer(display, window, &rootWindow, &rootWindow, &rootX, &rootY, &clientPoint.x, &clientPoint.y, &mask)) {
+        clientPoint.x = rootX;
+        clientPoint.y = rootY;
+    } else {
+        // Handle error: Unable to convert client coordinates to screen coordinates
+    }
+}
+
+
+void clickMouse(int x, int y) {
+    // Move the mouse pointer to the specified coordinates
+    XTestFakeMotionEvent(display, DefaultScreen(display), x, y, 0);
+    
+    // Simulate a button press and release (left mouse button)
+    XTestFakeButtonEvent(display, Button1, True, 0);
+    XTestFakeButtonEvent(display, Button1, False, 0);
+
+    // Flush the event queue to ensure the events are processed
+    XFlush(display);
 }
 
 bool isCollideRect(cv::Point rectCenter, const std::vector<cv::Rect> &others)
@@ -104,13 +174,12 @@ bool isCollideRect(cv::Point rectCenter, const std::vector<cv::Rect> &others)
     return false;
 }
 
-void handleWindowPart(HWND targetWindow, int partNumber)
+void handleWindowPart(Window targetWindow, int partNumber)
 {
     using Clock = std::chrono::high_resolution_clock;
     using TimePoint = std::chrono::time_point<Clock>;
     using Duration = std::chrono::milliseconds;
 
-    RECT windowRect;
     cv::Mat yellowMask, treasureMask, badMask, resultMask;
     cv::Mat target;
     int centerX, centerY;
@@ -132,14 +201,15 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     bool isClicked;
     double clickDistance;
 
-    INPUT input = {};
-    input.type = INPUT_MOUSE;
-    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP;
+    int width, height;
 
-    GetClientRect(targetWindow, &windowRect);
-
-    int width = windowRect.right - windowRect.left;
-    int height = windowRect.bottom - windowRect.top;
+    XWindowAttributes windowAttributes;
+    if (XGetWindowAttributes(display, targetWindow, &windowAttributes)) {
+        width = windowAttributes.width;
+        height = windowAttributes.height;
+    } else {
+        // Handle error: Unable to get window attributes
+    }
 
     // Calculate dimensions for each division
     int divisionWidth = (width - leftGap) / 2;
@@ -151,7 +221,7 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     int startX = (col * divisionWidth) + leftGap;
     int startY = (row * divisionHeight) + topGap;
 
-    ScreenshotTaker screenshotTaker(targetWindow, divisionWidth, divisionHeight, startX, startY);
+    ScreenshotTaker screenshotTaker(targetWindow, divisionWidth, divisionHeight, startX, startY, display);
 
     TimePoint startTime = Clock::now();
 
@@ -201,11 +271,7 @@ void handleWindowPart(HWND targetWindow, int partNumber)
                 if (!isClicked)
                 {
                     // Click on the center of the rectangle
-                    ClickMouse(centerX + startX, centerY + startY, input);
-                    ClickMouse(centerX + startX - 5, centerY + startY - 5, input);
-                    ClickMouse(centerX + startX + 5, centerY + startY - 5, input);
-                    ClickMouse(centerX + startX - 5, centerY + startY + 5, input);
-                    ClickMouse(centerX + startX + 5, centerY + startY + 5, input);
+                    clickMouse(centerX + startX, centerY + startY);
 
                     ClickedRect clicked = {{centerX, centerY}, Clock::now()};
                     clickedRects.emplace_back(clicked);
@@ -263,22 +329,27 @@ void handleWindowPart(HWND targetWindow, int partNumber)
 int main()
 {
     std::vector<std::thread> threads;
-    system("cls");
 
     char inp;
     std::cout << "\nInput any key to start ";
     std::cin >> inp;
 
-    // Get the target window handle
-    HWND targetWindow = FindWindowA(nullptr, WINDOW_NAME);
+    display = XOpenDisplay(nullptr);
+    if (!display) {
+        std::cout << "Error opening display." << std::endl;
+        return 1;
+    }
+
+    // Get the target window 
+    Window targetWindow = getWindowByName(WINDOW_NAME);
     // Check if the pointer is not null
-    if (targetWindow == nullptr)
+    if (targetWindow == 0)
     {
         std::cout << "Window not found." << std::endl;
         return 1;
     }
 
-    ClientToScreen(targetWindow, &zeroWindow);
+    clientToScreen(targetWindow, zeroWindow);
 
     for (size_t i = 1; i <= THREADS_NUM; i++)
     {
@@ -290,5 +361,7 @@ int main()
         thread.join();
     }
 
+    XCloseDisplay(display);
+    
     return 0;
 }
