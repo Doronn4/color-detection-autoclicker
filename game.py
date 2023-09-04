@@ -6,12 +6,12 @@ pygame.init()
 
 # Screen dimensions (phone-like resolution)
 SCREEN_WIDTH = 430
-SCREEN_HEIGHT = 920
+SCREEN_HEIGHT = 950
 
 # Colors
-RED =(250, 166, 216)
-GREEN = (249, 206, 91)
-BLUE = (169, 212, 217)
+RED = (242, 204, 138)
+GREEN = (255, 255, 255)
+BLUE = (219, 90, 74)
 
 # Circle settings
 CIRCLE_RADIUS = 30
@@ -37,6 +37,8 @@ blue_balls = []
 # Font settings for displaying FPS
 font = pygame.font.Font(None, 36)
 
+count = 0
+
 # Game loop
 running = True
 while running:
@@ -51,6 +53,8 @@ while running:
                 circle_x, circle_y = pos
                 if (x - circle_x) ** 2 + (y - circle_y) ** 2 < CIRCLE_RADIUS ** 2:
                     circles.remove(circle)
+                    count += 1
+                    print('[+] Count -', count)
 
             for circle in blue_balls:
                 pos, _, _ , _= circle
@@ -74,7 +78,7 @@ while running:
 
 
     # Clear the screen
-    screen.fill((255, 255, 255))
+    screen.fill((0, 0, 0))
 
     for idx, blue_ball in enumerate(blue_balls):
         pos, color, vel, bounce_count = blue_ball
