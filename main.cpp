@@ -50,30 +50,29 @@ private:
     HWND target;
 };
 
-const cv::Scalar yellowLow = cv::Scalar(18, 100, 235);
-const cv::Scalar yellowHigh = cv::Scalar(22, 115, 245);
+struct RGB_COLOR
+{
+    int red;
+    int blue;
+    int green;
+};
 
-const cv::Scalar treasureLow = cv::Scalar(0, 0, 240);
-const cv::Scalar treasureHigh = cv::Scalar(179, 25, 255);
-
-const cv::Scalar badLow = cv::Scalar(4, 170, 228);
-const cv::Scalar badHigh = cv::Scalar(8, 180, 240);
+const RGB_COLOR goodColors[2] = {{0, 0, 0}, {0, 0, 0}};
+const RGB_COLOR badColor = {0, 0, 0};
 
 const LPCSTR WINDOW_NAME = "Moving Circles"; //"BlueStacks App Player";
 const int THREADS_NUM = 12;
 const int leftGap = 0; // 320;
 const int topGap = 0;  // 115; // 143;
 const int RUNTIME = 20;
-const int MAX_DISTANCE = 180;
 const int MIN_CLICK_DISTANCE = 5;
 const long MAX_CLICKED_TIME = 500; // MS
 const int TARGET_FPS = 120;
-const double MIN_RECT_AREA = 30 * 30;
 
 const std::chrono::milliseconds FRAME_DURATION(1000 / TARGET_FPS);
 const long DX_C = 65535 / GetSystemMetrics(SM_CXSCREEN);
 const long DY_C = 65535 / GetSystemMetrics(SM_CYSCREEN);
-struct ClickedRect
+struct ClickedPoint
 {
     cv::Point center;
     std::chrono::time_point<std::chrono::high_resolution_clock> clickedTime;
@@ -89,21 +88,6 @@ void ClickMouse(int x, int y, INPUT &input)
     SendInput(1, &input, sizeof(INPUT));
 }
 
-bool isCollideRect(cv::Point rectCenter, const std::vector<cv::Rect> &others)
-{
-    for (const auto &other : others)
-    {
-        cv::Point otherCenter(other.x + other.width / 2, other.y + other.height / 2);
-        double distance = cv::norm(rectCenter - otherCenter);
-
-        if (distance < MAX_DISTANCE && other.area() > MIN_RECT_AREA)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 void handleWindowPart(HWND targetWindow, int partNumber)
 {
     using Clock = std::chrono::high_resolution_clock;
@@ -115,13 +99,7 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     cv::Mat target;
     int centerX, centerY;
 
-    std::vector<cv::Rect> badRects;
-    std::vector<std::vector<cv::Point>> badContours;
-    std::vector<std::vector<cv::Point>> contours;
-
-    cv::Rect boundRect;
-
-    std::vector<ClickedRect> clickedRects;
+    std::vector<ClickedPoint> clickedPoints;
 
     TimePoint lastFrameTime = Clock::now();
     TimePoint currentTime, endTime;
@@ -159,70 +137,41 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     {
         target = screenshotTaker.takeScreenshotPart();
 
-        cv::cvtColor(target, target, cv::COLOR_BGR2HSV);
-
-        cv::inRange(target, yellowLow, yellowHigh, yellowMask);
-
-        cv::inRange(target, treasureLow, treasureHigh, treasureMask);
-        cv::inRange(target, badLow, badHigh, badMask);
-
-        cv::bitwise_or(yellowMask, treasureMask, resultMask);
-
-        // Create a vector of all the bad contours bounding rects
-        cv::findContours(badMask, badContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
-        for (const auto &contour : badContours)
-        {
-            badRects.emplace_back(cv::boundingRect(contour));
-        }
-
         cv::findContours(resultMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
 
         for (const auto &contour : contours)
         {
-            boundRect = cv::boundingRect(contour);
             // Calculate the center of the rectangle
             centerX = boundRect.x + boundRect.width / 2;
             centerY = boundRect.y + boundRect.height / 2;
 
-            if (boundRect.area() > MIN_RECT_AREA && !isCollideRect({centerX, centerY}, badRects))
+            isClicked = false;
+            for (const ClickedPoint &clickedRect : clickedPoints)
             {
-                isClicked = false;
-                for (const ClickedRect &clickedRect : clickedRects)
+                clickDistance = cv::norm(cv::Point(centerX, centerY) - clickedRect.center);
+
+                if (clickDistance < MIN_CLICK_DISTANCE)
                 {
-                    clickDistance = cv::norm(cv::Point(centerX, centerY) - clickedRect.center);
-
-                    if (clickDistance < MIN_CLICK_DISTANCE)
-                    {
-                        isClicked = true;
-                        break;
-                    }
+                    isClicked = true;
+                    break;
                 }
+            }
 
-                if (!isClicked)
-                {
-                    // Click on the center of the rectangle
-                    ClickMouse(centerX + startX, centerY + startY, input);
-                    ClickMouse(centerX + startX - 5, centerY + startY - 5, input);
-                    ClickMouse(centerX + startX + 5, centerY + startY - 5, input);
-                    ClickMouse(centerX + startX - 5, centerY + startY + 5, input);
-                    ClickMouse(centerX + startX + 5, centerY + startY + 5, input);
-
-                    ClickedRect clicked = {{centerX, centerY}, Clock::now()};
-                    clickedRects.emplace_back(clicked);
-                    // counter++;
-                }
-                // ClickMouse(centerX + startX, centerY + startY, input);
-                // ClickedRect clicked = {{centerX, centerY}, Clock::now()};
-                // clickedRects.emplace_back(clicked);
+            if (!isClicked)
+            {
+                // Click on the center of the rectangle
+                ClickMouse(centerX + startX, centerY + startY, input);
+                ClickedPoint clicked = {{centerX, centerY}, Clock::now()};
+                clickedPoints.emplace_back(clicked);
             }
 
             currentTime = Clock::now();
 
-            for (auto it = clickedRects.begin(); it != clickedRects.end();)
+            for (auto it = clickedPoints.begin(); it != clickedPoints.end();)
             {
                 if (std::chrono::duration_cast<Duration>(currentTime - it->clickedTime).count() > MAX_CLICKED_TIME)
                 {
-                    it = clickedRects.erase(it);
+                    it = clickedPoints.erase(it);
                 }
                 else
                 {
@@ -232,9 +181,6 @@ void handleWindowPart(HWND targetWindow, int partNumber)
         }
 
         // Clear the vectors after processing the current frame
-        badContours.clear();
-        badRects.clear();
-        contours.clear();
 
 #ifdef LIMIT_FPS
         currentTime = Clock::now();
