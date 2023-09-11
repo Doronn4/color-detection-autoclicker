@@ -202,18 +202,10 @@ void handleWindowPart(HWND targetWindow, int partNumber)
                 {
                     // Click on the center of the rectangle
                     ClickMouse(centerX + startX, centerY + startY, input);
-                    ClickMouse(centerX + startX - 5, centerY + startY - 5, input);
-                    ClickMouse(centerX + startX + 5, centerY + startY - 5, input);
-                    ClickMouse(centerX + startX - 5, centerY + startY + 5, input);
-                    ClickMouse(centerX + startX + 5, centerY + startY + 5, input);
 
                     ClickedRect clicked = {{centerX, centerY}, Clock::now()};
                     clickedRects.emplace_back(clicked);
-                    // counter++;
                 }
-                // ClickMouse(centerX + startX, centerY + startY, input);
-                // ClickedRect clicked = {{centerX, centerY}, Clock::now()};
-                // clickedRects.emplace_back(clicked);
             }
 
             currentTime = Clock::now();
@@ -254,10 +246,8 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     }
     currentTime = Clock::now();
     std::unique_lock<std::mutex> lock(coutMutex);
-    // clicksNumber = counter;
     auto elapsedTime = std::chrono::duration_cast<Duration>(currentTime - startTime);
     std::cout << "[+] AVG FPS: " << int(frames / (elapsedTime.count() / 1000)) << std::endl;
-    // std::cout << "[-] Contours max size: " << max << ", bad size: " << max2 << std::endl;
 }
 
 int main()
