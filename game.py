@@ -9,13 +9,13 @@ SCREEN_WIDTH = 430
 SCREEN_HEIGHT = 950
 
 # Colors
-RED = (242, 204, 138)
-GREEN = (255, 255, 255)
-BLUE = (219, 90, 74)
+RED = (239, 64, 56)
+GREEN = (144, 167, 112)
+BLUE = (0, 0, 0)
 
 # Circle settings
 CIRCLE_RADIUS = 30
-CIRCLE_SPEED = 2  # Adjust the speed as needed
+CIRCLE_SPEED = 3  # Adjust the speed as needed
 
 # Function to generate random position for the circle
 def random_position():
@@ -78,7 +78,7 @@ while running:
 
 
     # Clear the screen
-    screen.fill((0, 0, 0))
+    screen.fill((255, 255, 255))
 
     for idx, blue_ball in enumerate(blue_balls):
         pos, color, vel, bounce_count = blue_ball

@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <thread>
 #include <chrono>
+#include <cmath>
 
 #define DEBUG false
 #define LIMIT_FPS false
@@ -53,21 +54,23 @@ private:
 struct RGB_COLOR
 {
     int red;
-    int blue;
     int green;
+    int blue;
 };
 
-const RGB_COLOR goodColors[2] = {{0, 0, 0}, {0, 0, 0}};
-const RGB_COLOR badColor = {0, 0, 0};
+const RGB_COLOR goodColors[2] = {{239, 64, 56}, {144, 167, 112}};
+const RGB_COLOR badColor = {0, 0, 0}; //;{255, 222, 115};
 
-const LPCSTR WINDOW_NAME = "Moving Circles"; //"BlueStacks App Player";
-const int THREADS_NUM = 12;
-const int leftGap = 0; // 320;
-const int topGap = 0;  // 115; // 143;
-const int RUNTIME = 20;
-const int MIN_CLICK_DISTANCE = 5;
-const long MAX_CLICKED_TIME = 500; // MS
-const int TARGET_FPS = 120;
+const LPCSTR WINDOW_NAME = "BlueStacks App Player";
+const int THREADS_NUM = 8;
+const int leftGap = 320;
+const int topGap = 115; // 143;
+const int RUNTIME = 47;
+const int MIN_CLICK_DISTANCE = 10;
+const long MAX_CLICKED_TIME = 300; // MS
+const int TARGET_FPS = 240;
+const int COLOR_ERROR = 5;
+const int minProximity = 150;
 
 const std::chrono::milliseconds FRAME_DURATION(1000 / TARGET_FPS);
 const long DX_C = 65535 / GetSystemMetrics(SM_CXSCREEN);
@@ -80,12 +83,59 @@ struct ClickedPoint
 POINT zeroWindow = {0, 0};
 std::mutex coutMutex;
 
+bool compareColors(const RGB_COLOR &color1, const cv::Vec3b &color2, int errorRange)
+{
+    int rDiff = std::abs(color1.red - color2[2]);
+    int gDiff = std::abs(color1.green - color2[1]);
+    int bDiff = std::abs(color1.blue - color2[0]);
+
+    return (rDiff <= errorRange) && (gDiff <= errorRange) && (bDiff <= errorRange);
+}
+
+double calculateDistance(const cv::Point &p1, const cv::Point &p2)
+{
+    int dx = p2.x - p1.x;
+    int dy = p2.y - p1.y;
+
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+bool isBadPointNearby(const cv::Mat &image, const cv::Point &point)
+{
+    // Calculate the valid range
+    int xStart = std::max<int>(0, point.x - minProximity);
+    int xEnd = std::min<int>(image.cols, point.x + minProximity);
+    int yStart = std::max<int>(0, point.y - minProximity);
+    int yEnd = std::min<int>(image.rows, point.y + minProximity);
+
+    // Iterate through a square region around the specified point
+    for (int y = yStart; y <= yEnd; ++y)
+    {
+        for (int x = xStart; x <= xEnd; ++x)
+        {
+            // Check the color of the pixel in the proximity
+            cv::Vec3b nearbyColor = image.at<cv::Vec3b>(y, x);
+
+            // Compare the color to the predefined red color with a specified error range
+            if (compareColors(badColor, nearbyColor, COLOR_ERROR))
+            {
+                // Found a red point within the proximity
+                return true;
+            }
+        }
+    }
+
+    // No red point found within the specified proximity
+    return false;
+}
+
 void ClickMouse(int x, int y, INPUT &input)
 {
     input.mi.dx = (x + zeroWindow.x) * DX_C;
     input.mi.dy = (y + zeroWindow.y) * DY_C;
 
     SendInput(1, &input, sizeof(INPUT));
+    std::cout << " ! ";
 }
 
 void handleWindowPart(HWND targetWindow, int partNumber)
@@ -95,9 +145,7 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     using Duration = std::chrono::milliseconds;
 
     RECT windowRect;
-    cv::Mat yellowMask, treasureMask, badMask, resultMask;
     cv::Mat target;
-    int centerX, centerY;
 
     std::vector<ClickedPoint> clickedPoints;
 
@@ -137,50 +185,54 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     {
         target = screenshotTaker.takeScreenshotPart();
 
-        cv::findContours(resultMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
-
-        for (const auto &contour : contours)
+        for (int i = 0; i < target.rows; i++)
         {
-            // Calculate the center of the rectangle
-            centerX = boundRect.x + boundRect.width / 2;
-            centerY = boundRect.y + boundRect.height / 2;
-
-            isClicked = false;
-            for (const ClickedPoint &clickedRect : clickedPoints)
+            for (int j = 0; j < target.cols; j++)
             {
-                clickDistance = cv::norm(cv::Point(centerX, centerY) - clickedRect.center);
+                auto color = target.at<cv::Vec3b>(i, j);
 
-                if (clickDistance < MIN_CLICK_DISTANCE)
+                for (const auto &goodColor : goodColors)
                 {
-                    isClicked = true;
-                    break;
-                }
-            }
+                    if (compareColors(goodColor, color, COLOR_ERROR))
+                    {
+                        isClicked = false;
 
-            if (!isClicked)
-            {
-                // Click on the center of the rectangle
-                ClickMouse(centerX + startX, centerY + startY, input);
-                ClickedPoint clicked = {{centerX, centerY}, Clock::now()};
-                clickedPoints.emplace_back(clicked);
-            }
+                        for (const ClickedPoint &clickedPoint : clickedPoints)
+                        {
+                            clickDistance = calculateDistance(cv::Point(j, i), clickedPoint.center);
 
-            currentTime = Clock::now();
+                            if (clickDistance < MIN_CLICK_DISTANCE)
+                            {
+                                isClicked = true;
+                                break;
+                            }
+                        }
 
-            for (auto it = clickedPoints.begin(); it != clickedPoints.end();)
-            {
-                if (std::chrono::duration_cast<Duration>(currentTime - it->clickedTime).count() > MAX_CLICKED_TIME)
-                {
-                    it = clickedPoints.erase(it);
-                }
-                else
-                {
-                    ++it;
+                        if (!isClicked && !isBadPointNearby(target, {j, i}))
+                        {
+                            // Click on the center of the rectangle
+                            ClickMouse(j + startX, i + startY, input);
+                            ClickedPoint clicked = {{j, i}, Clock::now()};
+                            clickedPoints.emplace_back(clicked);
+                        }
+                    }
                 }
             }
         }
 
-        // Clear the vectors after processing the current frame
+        currentTime = Clock::now();
+
+        for (auto it = clickedPoints.begin(); it != clickedPoints.end();)
+        {
+            if (std::chrono::duration_cast<Duration>(currentTime - it->clickedTime).count() > MAX_CLICKED_TIME)
+            {
+                it = clickedPoints.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
 
 #ifdef LIMIT_FPS
         currentTime = Clock::now();
@@ -194,16 +246,25 @@ void handleWindowPart(HWND targetWindow, int partNumber)
         lastFrameTime = currentTime;
 #endif
 
+        // if (partNumber == 1)
+        // {
+        //     cv::imshow("test", target);
+        //     cv::waitKey(1);
+        // }
+
         endTime = Clock::now();
         time_elapsed = std::chrono::duration_cast<Duration>(endTime - startTime).count() / 1000;
         frames++;
     }
+
     currentTime = Clock::now();
     std::unique_lock<std::mutex> lock(coutMutex);
-    // clicksNumber = counter;
+    std::cout << "w: " << divisionWidth << " h: " << divisionHeight << std::endl;
+
+    std::cout << "sX: " << startX << ", sY: " << startY << std::endl;
+
     auto elapsedTime = std::chrono::duration_cast<Duration>(currentTime - startTime);
     std::cout << "[+] AVG FPS: " << int(frames / (elapsedTime.count() / 1000)) << std::endl;
-    // std::cout << "[-] Contours max size: " << max << ", bad size: " << max2 << std::endl;
 }
 
 int main()
