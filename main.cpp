@@ -59,11 +59,11 @@ const cv::Scalar treasureHigh = cv::Scalar(179, 25, 255);
 const cv::Scalar badLow = cv::Scalar(4, 170, 228);
 const cv::Scalar badHigh = cv::Scalar(8, 180, 240);
 
-const LPCSTR WINDOW_NAME = "Moving Circles"; //"BlueStacks App Player";
+const LPCSTR WINDOW_NAME = "BlueStacks App Player";
 const int THREADS_NUM = 12;
-const int leftGap = 0; // 320;
-const int topGap = 0;  // 115; // 143;
-const int RUNTIME = 20;
+const int leftGap = 320;
+const int topGap = 115; // 143;
+const int RUNTIME = 47;
 const int MAX_DISTANCE = 180;
 const int MIN_CLICK_DISTANCE = 5;
 const long MAX_CLICKED_TIME = 500; // MS
