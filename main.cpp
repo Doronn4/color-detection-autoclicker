@@ -50,14 +50,14 @@ private:
     HWND target;
 };
 
-const cv::Scalar yellowLow = cv::Scalar(18, 100, 235);
-const cv::Scalar yellowHigh = cv::Scalar(22, 115, 245);
+const cv::Scalar yellowLow = cv::Scalar(16, 104, 236);
+const cv::Scalar yellowHigh = cv::Scalar(24, 111, 248);
 
-const cv::Scalar treasureLow = cv::Scalar(0, 0, 240);
-const cv::Scalar treasureHigh = cv::Scalar(179, 25, 255);
+const cv::Scalar treasureLow = cv::Scalar(0, 0, 245);
+const cv::Scalar treasureHigh = cv::Scalar(0, 0, 255);
 
-const cv::Scalar badLow = cv::Scalar(4, 170, 228);
-const cv::Scalar badHigh = cv::Scalar(8, 180, 240);
+const cv::Scalar badLow = cv::Scalar(4, 170, 230);
+const cv::Scalar badHigh = cv::Scalar(8, 180, 238);
 
 const LPCSTR WINDOW_NAME = "BlueStacks App Player";
 const int THREADS_NUM = 12;
@@ -65,8 +65,8 @@ const int leftGap = 320;
 const int topGap = 115; // 143;
 const int RUNTIME = 47;
 const int MAX_DISTANCE = 180;
-const int MIN_CLICK_DISTANCE = 5;
-const long MAX_CLICKED_TIME = 500; // MS
+const int MIN_CLICK_DISTANCE = 3;
+const long MAX_CLICKED_TIME = 200; // MS
 const int TARGET_FPS = 120;
 const double MIN_RECT_AREA = 30 * 30;
 
@@ -89,7 +89,7 @@ void ClickMouse(int x, int y, INPUT &input)
     SendInput(1, &input, sizeof(INPUT));
 }
 
-bool isCollideRect(cv::Point rectCenter, const std::vector<cv::Rect> &others)
+cv::Point isCollideRect(cv::Point rectCenter, const std::vector<cv::Rect> &others)
 {
     for (const auto &other : others)
     {
@@ -98,10 +98,10 @@ bool isCollideRect(cv::Point rectCenter, const std::vector<cv::Rect> &others)
 
         if (distance < MAX_DISTANCE && other.area() > MIN_RECT_AREA)
         {
-            return true;
+            return otherCenter;
         }
     }
-    return false;
+    return {-1, -1};
 }
 
 void handleWindowPart(HWND targetWindow, int partNumber)
@@ -110,10 +110,11 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     using TimePoint = std::chrono::time_point<Clock>;
     using Duration = std::chrono::milliseconds;
 
+    cv::Mat visualization;
+
     RECT windowRect;
     cv::Mat yellowMask, treasureMask, badMask, resultMask;
     cv::Mat target;
-    int centerX, centerY;
 
     std::vector<cv::Rect> badRects;
     std::vector<std::vector<cv::Point>> badContours;
@@ -125,6 +126,8 @@ void handleWindowPart(HWND targetWindow, int partNumber)
 
     TimePoint lastFrameTime = Clock::now();
     TimePoint currentTime, endTime;
+
+    cv::Point rectCenter;
 
     int frames = 0;
     double time_elapsed = 0;
@@ -142,8 +145,8 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     int height = windowRect.bottom - windowRect.top;
 
     // Calculate dimensions for each division
-    int divisionWidth = (width - leftGap) / 2;
-    int divisionHeight = (height - topGap) / (THREADS_NUM / 2);
+    int divisionWidth = THREADS_NUM == 1 ? width - leftGap : (width - leftGap) / 2;
+    int divisionHeight = THREADS_NUM == 1 ? height - topGap : (height - topGap) / (THREADS_NUM / 2);
 
     int row = (partNumber - 1) / 2;
     int col = 1 - (partNumber % 2);
@@ -159,6 +162,11 @@ void handleWindowPart(HWND targetWindow, int partNumber)
     {
         target = screenshotTaker.takeScreenshotPart();
 
+        if (partNumber == 1)
+        {
+            visualization = target.clone();
+        }
+
         cv::cvtColor(target, target, cv::COLOR_BGR2HSV);
 
         cv::inRange(target, yellowLow, yellowHigh, yellowMask);
@@ -168,7 +176,6 @@ void handleWindowPart(HWND targetWindow, int partNumber)
 
         cv::bitwise_or(yellowMask, treasureMask, resultMask);
 
-        // Create a vector of all the bad contours bounding rects
         cv::findContours(badMask, badContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
         for (const auto &contour : badContours)
         {
@@ -180,16 +187,16 @@ void handleWindowPart(HWND targetWindow, int partNumber)
         for (const auto &contour : contours)
         {
             boundRect = cv::boundingRect(contour);
-            // Calculate the center of the rectangle
-            centerX = boundRect.x + boundRect.width / 2;
-            centerY = boundRect.y + boundRect.height / 2;
+            rectCenter = {boundRect.x + boundRect.width / 2, boundRect.y + boundRect.height / 2};
 
-            if (boundRect.area() > MIN_RECT_AREA && !isCollideRect({centerX, centerY}, badRects))
+            cv::Point collisionPoint = isCollideRect(rectCenter, badRects);
+
+            if (boundRect.area() > MIN_RECT_AREA && collisionPoint == cv::Point(-1, -1))
             {
                 isClicked = false;
                 for (const ClickedRect &clickedRect : clickedRects)
                 {
-                    clickDistance = cv::norm(cv::Point(centerX, centerY) - clickedRect.center);
+                    clickDistance = cv::norm(rectCenter - clickedRect.center);
 
                     if (clickDistance < MIN_CLICK_DISTANCE)
                     {
@@ -200,11 +207,31 @@ void handleWindowPart(HWND targetWindow, int partNumber)
 
                 if (!isClicked)
                 {
-                    // Click on the center of the rectangle
-                    ClickMouse(centerX + startX, centerY + startY, input);
+                    if (partNumber == 1)
+                    {
+                        cv::rectangle(visualization, boundRect, cv::Scalar(0, 255, 0), 2); // Draw rectangles on the visualization image
+                    }
 
-                    ClickedRect clicked = {{centerX, centerY}, Clock::now()};
+                    // Click on the center of the rectangle
+                    ClickMouse(rectCenter.x + startX, rectCenter.y + startY, input);
+
+                    ClickedRect clicked = {rectCenter, Clock::now()};
                     clickedRects.emplace_back(clicked);
+                }
+                else
+                {
+                    if (partNumber == 1)
+                    {
+                        cv::rectangle(visualization, boundRect, cv::Scalar(255, 0, 0), 2); // Draw rectangles on the visualization image
+                    }
+                }
+            }
+            else
+            {
+                if (partNumber == 1)
+                {
+                    cv::rectangle(visualization, boundRect, cv::Scalar(255, 0, 0), 2); // Draw rectangles on the visualization image
+                    cv::line(visualization, rectCenter, collisionPoint, cv::Scalar(255, 0, 0), 2);
                 }
             }
 
@@ -223,7 +250,20 @@ void handleWindowPart(HWND targetWindow, int partNumber)
             }
         }
 
-        // Clear the vectors after processing the current frame
+        if (partNumber == 1)
+        {
+            for (const auto &badRect : badRects)
+            {
+                cv::rectangle(visualization, badRect, cv::Scalar(0, 0, 255), 2); // Draw bad rectangles on the visualization image
+            }
+        }
+
+        if (partNumber == 1)
+        {
+            cv::imshow("Visualization", visualization);
+            cv::waitKey(1); // Update the visualization window
+        }
+
         badContours.clear();
         badRects.clear();
         contours.clear();
@@ -275,7 +315,7 @@ int main()
         threads.emplace_back(handleWindowPart, targetWindow, i);
     }
 
-    for (std::thread &thread : threads)
+    for (auto &thread : threads)
     {
         thread.join();
     }

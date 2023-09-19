@@ -9,9 +9,9 @@ SCREEN_WIDTH = 430
 SCREEN_HEIGHT = 950
 
 # Colors
-RED = (242, 204, 138)
+RED = (219, 91, 75)
 GREEN = (255, 255, 255)
-BLUE = (219, 90, 74)
+BLUE = (255, 222, 115)
 
 # Circle settings
 CIRCLE_RADIUS = 30
