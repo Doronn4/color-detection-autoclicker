@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # Example of custom autoclicker configuration
     autoclicker_config = {
         "threads": 12,
-        "max_distance": 50,
+        "max_distance": 150,
         "min_click_distance": 10,
         "max_clicked_time": 250,
         "target_fps": 144,

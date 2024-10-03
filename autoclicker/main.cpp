@@ -164,13 +164,13 @@ Config parseArgs(int argc, char* argv[]) {
     return config;
 }
 
-void ClickMouse(int x, int y, INPUT& input, const POINT& zeroWindow) {
+inline void ClickMouse(int x, int y, INPUT& input, const POINT& zeroWindow) {
     input.mi.dx = (x + zeroWindow.x) * 65535 / GetSystemMetrics(SM_CXSCREEN);
     input.mi.dy = (y + zeroWindow.y) * 65535 / GetSystemMetrics(SM_CYSCREEN);
     SendInput(1, &input, sizeof(INPUT));
 }
 
-bool isCollideRect(const cv::Point& rectCenter, const std::vector<cv::Rect>& others, int maxDistance, double minRectArea) {
+inline bool isCollideRect(const cv::Point& rectCenter, const std::vector<cv::Rect>& others, int maxDistance, double minRectArea) {
     for (const auto& other : others) {
         cv::Point otherCenter(other.x + other.width / 2, other.y + other.height / 2);
         double distance = cv::norm(rectCenter - otherCenter);
@@ -192,7 +192,7 @@ void handleWindowPart(HWND targetWindow, int partNumber, const Config& config, s
     int width = windowRect.right - windowRect.left;
     int height = windowRect.bottom - windowRect.top;
 
-    const int topGap = config.topGapBase + (height * config.topBarScreenRatio);
+    const int topGap = config.topGapBase + static_cast<int>(height * config.topBarScreenRatio);
     int divisionWidth = config.threadsNum == 1 ? width - config.leftGap : (width - config.leftGap) / 2;
     int divisionHeight = config.threadsNum == 1 ? height - topGap : (height - topGap) / (config.threadsNum / 2);
 
@@ -240,17 +240,22 @@ void handleWindowPart(HWND targetWindow, int partNumber, const Config& config, s
         }
 
         cv::findContours(badMask, badContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+        badRects.clear();
+        badRects.reserve(badContours.size());
         for (const auto& contour : badContours) {
             badRects.emplace_back(cv::boundingRect(contour));
         }
 
-        cv::findContours(resultMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+        cv::findContours(resultMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
+        TimePoint currentTime = Clock::now();
         for (const auto& contour : contours) {
             cv::Rect boundRect = cv::boundingRect(contour);
+            if (boundRect.area() <= config.minRectArea) continue;
+
             cv::Point rectCenter(boundRect.x + boundRect.width / 2, boundRect.y + boundRect.height / 2);
 
-            if (boundRect.area() > config.minRectArea && !isCollideRect(rectCenter, badRects, config.maxDistance, config.minRectArea)) {
+            if (!isCollideRect(rectCenter, badRects, config.maxDistance, config.minRectArea)) {
                 bool isClicked = false;
                 for (const ClickedRect& clickedRect : clickedRects) {
                     double clickDistance = cv::norm(rectCenter - clickedRect.center);
@@ -262,13 +267,12 @@ void handleWindowPart(HWND targetWindow, int partNumber, const Config& config, s
 
                 if (!isClicked) {
                     ClickMouse(rectCenter.x + startX, rectCenter.y + startY, input, zeroWindow);
-                    clickedRects.emplace_back(ClickedRect{ rectCenter, Clock::now() });
+                    clickedRects.emplace_back(ClickedRect{ rectCenter, currentTime });
                     localClicks++;
                 }
             }
         }
 
-        TimePoint currentTime = Clock::now();
         clickedRects.erase(
             std::remove_if(clickedRects.begin(), clickedRects.end(),
                 [&](const ClickedRect& rect) {
@@ -279,7 +283,6 @@ void handleWindowPart(HWND targetWindow, int partNumber, const Config& config, s
         );
 
         badContours.clear();
-        badRects.clear();
         contours.clear();
 
         Duration elapsedTime = std::chrono::duration_cast<Duration>(currentTime - lastFrameTime);
@@ -303,6 +306,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<std::thread> threads;
+    threads.reserve(config.threadsNum);
     std::atomic<int> totalClicks(0);
 
     auto startTime = std::chrono::high_resolution_clock::now();
