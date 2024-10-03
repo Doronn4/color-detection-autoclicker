@@ -1,0 +1,11 @@
+{
+  "screen_width": 546,
+  "screen_height": 900,
+  "num_circles": 8,
+  "circle_speed": 8.0,
+  "fps": 144,
+  "duration": 20,
+  "good_colors": ["rgb(243, 208, 141)", "white"],
+  "bad_colors": ["rgb(235, 106, 74)"],
+  "max_bumps": 5
+}
